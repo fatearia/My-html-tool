@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>JSON 可視化編輯器｜單檔 HTML（含 Sprint 管理）</title>
+  <title>JSON 可視化編輯器｜精簡版（隱藏建立時間／狀態上色／日期精簡）</title>
   <style>
     :root {
       --bg: #0b0f14;
@@ -17,6 +17,11 @@
       --border: #1f2a37;
       --card: #0f1722;
       --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --review: #8b5cf6;
+      --todo: #64748b;    /* slate */
+      --inprogress: #fbbf24;
+      --done: #34d399;
+      --blocked: #f87171;
     }
     * { box-sizing: border-box }
     body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--text); }
@@ -44,18 +49,41 @@
 
     /* Table View */
     table { width: 100%; border-collapse: collapse; }
+    thead tr { background: #0f1722; }
     th, td { border-bottom: 1px solid var(--border); padding: 10px; text-align: left; vertical-align: top }
+    tr:hover td { background: #0a1422; }
     th { color: var(--muted); font-weight: 700; position: sticky; top: 66px; background: var(--panel); z-index: 10; cursor: pointer }
     th .sort { opacity:.5; font-size: 11px; margin-left:6px }
     td[contenteditable="true"] { outline: none; border-radius: 8px }
     td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px var(--primary); background: #0a1422 }
     .actions { display:flex; gap:8px }
 
+    /* Status pill / select coloring */
+    .status-select { border-radius: 999px; padding: 6px 10px; font-weight: 700; border: 1px solid var(--border); background: #0b1320; }
+    .status-select[data-color="todo"] { background: rgba(100,116,139,.2); color: #cbd5e1; }
+    .status-select[data-color="inprogress"] { background: rgba(251,191,36,.2); color: #fde68a; }
+    .status-select[data-color="done"] { background: rgba(52,211,153,.2); color: #a7f3d0; }
+    .status-select[data-color="blocked"] { background: rgba(248,113,113,.2); color: #fecaca; }
+    .status-select[data-color="review"] { background: rgba(139,92,246,.2); color: #ddd6fe; }
+	.status-select option {
+		background: #1e293b; /* 下拉清單背景 */
+		color: #f8fafc;      /* 下拉清單文字顏色 */
+	}
+
+    /* Period (dates) */
+    .period { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+    .period input[type="date"]{ width:auto; min-width: 150px }
+    .period .dash{ opacity:.6 }
+
     /* Kanban */
     .kanban { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 12px; align-items: start }
     .col { background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 10px; min-height: 60vh }
     .col h3 { margin: 4px 4px 10px; font-size: 14px; color: var(--muted); display:flex; align-items:center; justify-content: space-between }
-    .col .count { font-weight: 800; color: var(--primary) }
+    .col[data-status="To Do"] h3 { color: #cbd5e1 }
+    .col[data-status="In Progress"] h3 { color: #fde68a }
+    .col[data-status="Done"] h3 { color: #a7f3d0 }
+    .col[data-status="Blocked"] h3 { color: #fecaca }
+    .col[data-status="Review"] h3 { color: #ddd6fe }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin: 8px 0; cursor: grab; box-shadow: var(--shadow) }
     .card.dragging { opacity: .6; transform: rotate(1deg) }
     .card h4 { margin: 0 0 6px; font-size: 15px }
@@ -138,8 +166,6 @@
           <option value="start_date.desc">開始時間 ↓</option>
           <option value="end_date.asc">結束時間 ↑</option>
           <option value="end_date.desc">結束時間 ↓</option>
-          <option value="created.asc">建立時間 ↑</option>
-          <option value="created.desc">建立時間 ↓</option>
         </select>
       </div>
     </section>
@@ -160,9 +186,7 @@
           <th data-sort="components">組件 <span class="sort">⇅</span></th>
           <th data-sort="writer" style="width:140px">作者 <span class="sort">⇅</span></th>
           <th data-sort="sprint" style="width:180px">Sprint <span class="sort">⇅</span></th>
-          <th data-sort="start_date" style="width:210px">開始時間 <span class="sort">⇅</span></th>
-          <th data-sort="end_date" style="width:210px">結束時間 <span class="sort">⇅</span></th>
-          <th data-sort="created" style="width:150px">建立時間 <span class="sort">⇅</span></th>
+          <th style="width:260px">期間</th>
           <th style="width:120px">操作</th>
         </tr>
       </thead>
@@ -200,7 +224,7 @@
     sort: { by:'', dir:'asc' },
     zoom: 5, // timeline 每天像素（1~10）
     seq: 1,
-    // 新增：Sprint 管理
+    // Sprint 管理
     sprints: [], // {id,name,start,end,order}
   };
 
@@ -236,19 +260,18 @@
     const d = new Date(str);
     return isNaN(d) ? null : d;
   }
-  function toLocalInputValue(str){
+  function toLocalInputValue_date(str){
     const d = parseDate(str); if(!d) return '';
     const pad = (n)=> String(n).padStart(2,'0');
     const yyyy = d.getFullYear();
     const mm = pad(d.getMonth()+1);
     const dd = pad(d.getDate());
-    const hh = pad(d.getHours());
-    const mi = pad(d.getMinutes());
-    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+    return `${yyyy}-${mm}-${dd}`;
   }
-  function toISOFromInput(v){
+  function toISODate(v){
     if(!v) return '';
-    const d = new Date(v);
+    const [y,m,da] = v.split('-');
+    const d = new Date(Number(y), Number(m)-1, Number(da));
     return isNaN(d) ? '' : d.toISOString();
   }
 
@@ -263,25 +286,17 @@
       writer: t.writer || '',
       fix_versions: Array.isArray(t.fix_versions) ? t.fix_versions : [],
       sprint: t.sprint || '',
-      created: t.created || new Date().toISOString(),
+      // created: t.created || new Date().toISOString(), // 不顯示建立時間，保留資料即可
       start_date: t.start_date || '',
       end_date: t.end_date || '',
     };
     return s;
   }
 
-  // Sprint 物件：名稱去前後空白；確保唯一 id
   function sanitizeSprint(s){
-    return {
-      id: s.id || uid(),
-      name: (s.name||'').trim(),
-      start: s.start || '',
-      end: s.end || '',
-      order: typeof s.order==='number' ? s.order : Number.MAX_SAFE_INTEGER,
-    }
+    return { id: s.id || uid(), name: (s.name||'').trim(), start: s.start || '', end: s.end || '', order: typeof s.order==='number' ? s.order : Number.MAX_SAFE_INTEGER };
   }
 
-  // 將既有任務中的 sprint 字串匯入為 Sprint 物件（初次載入或缺少定義時）
   function bootstrapSprintsFromTasks(){
     const names = uniq(state.tasks.map(t=>t.sprint));
     const existingNames = new Set(state.sprints.map(s=>s.name));
@@ -289,23 +304,13 @@
     let o = nextOrder;
     for(const n of names){
       if(!n) continue;
-      if(!existingNames.has(n)){
-        state.sprints.push(sanitizeSprint({name:n, order:o++}));
-      }
+      if(!existingNames.has(n)) state.sprints.push(sanitizeSprint({name:n, order:o++}));
     }
-    // 依 order 排好
     state.sprints.sort((a,b)=>a.order-b.order);
   }
 
-  // 自然排序（處理 Sprint 1、Sprint 2… 字串）
-  function naturalCompare(a,b){
-    return a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' });
-  }
-
-  function sprintIndexByName(name){
-    const i = state.sprints.findIndex(s=>s.name===name);
-    return i===-1 ? Number.MAX_SAFE_INTEGER : i; // 未定義的排最後
-  }
+  function naturalCompare(a,b){ return a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' }); }
+  function sprintIndexByName(name){ const i = state.sprints.findIndex(s=>s.name===name); return i===-1 ? Number.MAX_SAFE_INTEGER : i; }
 
   function applyFilters(list){
     const {q,status,writer,component,type,sprint} = state.filters;
@@ -327,26 +332,18 @@
     const sign = dir==='desc' ? -1 : 1;
     const val = (t)=>{
       if(by==='sprint') return sprintIndexByName(t.sprint);
-      if(by.endsWith('date') || by==='created') return parseDate(t[by])?.getTime() || 0;
+      if(by.endsWith('date')) return parseDate(t[by])?.getTime() || 0;
       if(by==='components') return (t.components||[]).join(',');
       return (t[by] ?? '').toString().toLowerCase();
     };
-    // sprint 相同時用自然排序備援
-    return clone(list).sort((a,b)=>{
-      const va = val(a), vb = val(b);
-      if(by==='sprint' && va===vb){
-        return naturalCompare(a.sprint||'', b.sprint||'') * sign;
-      }
-      return (va>vb?1:va<vb?-1:0) * sign;
-    });
+    return clone(list).sort((a,b)=>{ const va = val(a), vb = val(b); return (va>vb?1:va<vb?-1:0) * sign; });
   }
 
   function gatherMeta(list){
-    const statuses = uniq(list.map(t=>t.status).concat(['To Do','In Progress','Done']));
+    const statuses = uniq(list.map(t=>t.status).concat(['To Do','In Progress','Review','Blocked','Done']));
     const writers = uniq(list.map(t=>t.writer));
     const comps = uniq(list.flatMap(t=>t.components||[]));
     const types = uniq(list.map(t=>t.type));
-    // Sprint 選單以 state.sprints 為準（確保一致性與排序）
     const sprints = state.sprints.map(s=>s.name);
     return {statuses, writers, comps, types, sprints};
   }
@@ -360,15 +357,14 @@
     reader.onload = () => {
       try{
         const json = JSON.parse(reader.result);
-        if(!Array.isArray(json)) throw new Error('JSON 需要是陣列');
-        state.tasks = json.map(sanitizeTask);
-        // 任務載入後同步 Sprint 清單
-        bootstrapSprintsFromTasks();
+        const arr = Array.isArray(json) ? json : (Array.isArray(json.tasks) ? json.tasks : []);
+        if(!Array.isArray(arr)) throw new Error('JSON 需要是陣列或 {tasks: []}');
+        state.tasks = arr.map(sanitizeTask);
+        state.sprints = Array.isArray(json.sprints) ? json.sprints.map(sanitizeSprint) : [];
+        if(state.sprints.length===0) bootstrapSprintsFromTasks();
         saveLocal();
         renderAll();
-      }catch(err){
-        alert('讀取失敗：' + err.message);
-      }
+      }catch(err){ alert('讀取失敗：' + err.message); }
     };
     reader.readAsText(file);
   });
@@ -383,10 +379,10 @@
     URL.revokeObjectURL(a.href);
   });
 
-  function saveLocal(){ localStorage.setItem('json-editor-state', JSON.stringify(state)); }
+  function saveLocal(){ localStorage.setItem('json-editor-state-lite', JSON.stringify(state)); }
   function loadLocal(){
     try{
-      const raw = localStorage.getItem('json-editor-state');
+      const raw = localStorage.getItem('json-editor-state-lite');
       if(!raw) return;
       const s = JSON.parse(raw);
       if(Array.isArray(s.tasks)) state.tasks = s.tasks.map(sanitizeTask);
@@ -395,8 +391,7 @@
       if(s.zoom) state.zoom = s.zoom;
       if(s.sort) state.sort = s.sort;
       if(Array.isArray(s.sprints)) state.sprints = s.sprints.map(sanitizeSprint);
-      // 若使用舊版 state（沒有 sprints），從 tasks 建立一次
-      if(!Array.isArray(s.sprints)) bootstrapSprintsFromTasks();
+      if(!Array.isArray(s.sprints) || s.sprints.length===0) bootstrapSprintsFromTasks();
     }catch{}
   }
 
@@ -418,12 +413,8 @@
   el.fSort.addEventListener('change', ()=>{
     const v = el.fSort.value; // e.g. key.asc
     if(!v){ state.sort = {by:'',dir:'asc'}; }
-    else{
-      const [by, dir] = v.split('.');
-      state.sort = {by, dir};
-    }
-    saveLocal();
-    renderAll();
+    else{ const [by, dir] = v.split('.'); state.sort = {by, dir}; }
+    saveLocal(); renderAll();
   });
 
   // ------------------ 視圖切換 ------------------
@@ -453,42 +444,33 @@
   }
 
   // ------------------ Sprint 管理 ------------------
-  el.btnSprint.addEventListener('click', ()=>{
-    openSprintDialog();
-  });
+  el.btnSprint.addEventListener('click', ()=>{ openSprintDialog(); });
 
-  function openSprintDialog(){
-    renderSprintRows();
-    el.dlgSprint.showModal();
-  }
+  function openSprintDialog(){ renderSprintRows(); el.dlgSprint.showModal(); }
 
   el.btnAddSprint.addEventListener('click', ()=>{
     const maxOrder = state.sprints.length? Math.max(...state.sprints.map(s=>s.order)) : 0;
     state.sprints.push(sanitizeSprint({ name: `Sprint ${state.sprints.length+1}`, order: maxOrder+1 }));
-    saveLocal();
-    renderSprintRows();
-    renderAll();
+    saveLocal(); renderSprintRows(); renderAll();
   });
 
   function renderSprintRows(){
     el.sprintRows.innerHTML = '';
-    // 確保依 order 顯示
     state.sprints.sort((a,b)=>a.order-b.order);
 
-    state.sprints.forEach((s, idx)=>{
+    state.sprints.forEach((s)=>{
       const row = document.createElement('div');
       row.className = 'srow';
       row.draggable = true;
       row.dataset.id = s.id;
       row.innerHTML = `
         <input type="text" value="${escapeAttr(s.name)}" placeholder="名稱" data-field="name" />
-        <input type="date" value="${toLocalDate(s.start)}" data-field="start" />
-        <input type="date" value="${toLocalDate(s.end)}" data-field="end" />
+        <input type="date" value="${toLocalInputValue_date(s.start)}" data-field="start" />
+        <input type="date" value="${toLocalInputValue_date(s.end)}" data-field="end" />
         <div class="drag-handle" title="拖曳排序">⇅</div>
       `;
       el.sprintRows.appendChild(row);
 
-      // 編輯事件
       row.querySelectorAll('input').forEach(inp=>{
         inp.addEventListener('change', ()=>{
           const f = inp.dataset.field;
@@ -496,38 +478,27 @@
           if(f==='name') state.sprints[i].name = inp.value.trim();
           if(f==='start') state.sprints[i].start = toISODate(inp.value);
           if(f==='end') state.sprints[i].end = toISODate(inp.value);
-          saveLocal();
-          renderAll();
+          saveLocal(); renderAll();
         });
       });
 
-      // DnD 排序（以 order 儲存）
-      row.addEventListener('dragstart', ev=>{
-        ev.dataTransfer.setData('text/plain', s.id);
-      });
+      row.addEventListener('dragstart', ev=>{ ev.dataTransfer.setData('text/plain', s.id); });
       row.addEventListener('dragover', ev=>{ ev.preventDefault(); row.style.background = '#0f1b2c'; });
       row.addEventListener('dragleave', ()=> row.style.background = 'transparent');
       row.addEventListener('drop', ev=>{
         ev.preventDefault(); row.style.background = 'transparent';
         const fromId = ev.dataTransfer.getData('text/plain');
-        const toId = s.id;
-        if(fromId===toId) return;
+        const toId = s.id; if(fromId===toId) return;
         reorderSprintsById(fromId, toId);
-        saveLocal();
-        renderSprintRows();
-        renderAll();
+        saveLocal(); renderSprintRows(); renderAll();
       });
 
-      // 右鍵刪除
       row.addEventListener('contextmenu', (ev)=>{
         ev.preventDefault();
         if(confirm(`刪除 Sprint「${s.name}」？\n（不會刪除任務，只會清空任務上的 sprint 欄位）`)){
-          // 將任務中使用該 sprint 的清空
           state.tasks = state.tasks.map(t=> t.sprint===s.name ? {...t, sprint:''} : t);
           state.sprints = state.sprints.filter(x=>x.id!==s.id);
-          saveLocal();
-          renderSprintRows();
-          renderAll();
+          saveLocal(); renderSprintRows(); renderAll();
         }
       });
     });
@@ -540,22 +511,7 @@
     if(from===-1 || to===-1) return;
     const [moved] = arr.splice(from,1);
     arr.splice(to,0,moved);
-    // 重新編 order
     arr.forEach((s,i)=> s.order = i+1);
-  }
-
-  function toLocalDate(str){
-    const d = parseDate(str); if(!d) return '';
-    const pad = (n)=> String(n).padStart(2,'0');
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-  }
-  function toISODate(v){
-    if(!v) return '';
-    const d = new Date(v);
-    if(isNaN(d)) return '';
-    // 只取 YYYY-MM-DD，避免時區偏移
-    const [y,m,da] = v.split('-');
-    return new Date(Number(y), Number(m)-1, Number(da)).toISOString();
   }
 
   // ------------------ 表格視圖 ------------------
@@ -585,14 +541,12 @@
       tr.innerHTML = `
         <td>${escapeHTML(t.key)}</td>
         <td contenteditable="true" data-field="summary">${escapeHTML(t.summary)}</td>
-        <td>${renderSelect('status', t.status, meta.statuses)}</td>
+        <td>${renderStatusSelect(t.status, meta.statuses)}</td>
         <td contenteditable="true" data-field="type">${escapeHTML(t.type)}</td>
         <td contenteditable="true" data-field="components">${escapeHTML((t.components||[]).join(', '))}</td>
         <td contenteditable="true" data-field="writer">${escapeHTML(t.writer)}</td>
         <td>${renderSprintSelect(t.sprint)}</td>
-        <td><input type="datetime-local" value="${toLocalInputValue(t.start_date)}" data-field="start_date"/></td>
-        <td><input type="datetime-local" value="${toLocalInputValue(t.end_date)}" data-field="end_date"/></td>
-        <td>${escapeHTML(new Date(t.created).toLocaleString())}</td>
+        <td>${renderPeriodInputs(t)}</td>
         <td class="actions">
           <button class="btn warning" data-act="dup">複製</button>
           <button class="btn danger" data-act="del">刪除</button>
@@ -600,36 +554,34 @@
       `;
       tbody.appendChild(tr);
 
-      // 事件：文字欄位
+      // 可編輯文字欄位
       tr.querySelectorAll('[contenteditable="true"]').forEach(cell => {
         cell.addEventListener('blur', ()=>{
           const field = cell.dataset.field;
           const val = cell.textContent.trim();
           const idx = state.tasks.findIndex(x=>x.key===t.key);
-          if(field==='components'){
-            state.tasks[idx].components = compact(val.split(',').map(s=>s.trim()));
-          }else{
-            state.tasks[idx][field] = val;
-          }
+          if(field==='components') state.tasks[idx].components = compact(val.split(',').map(s=>s.trim()));
+          else state.tasks[idx][field] = val;
           saveLocal();
         });
       });
-      // 事件：日期欄位
-      tr.querySelectorAll('input[type="datetime-local"]').forEach(input=>{
+
+      // 日期欄位
+      tr.querySelectorAll('input[type="date"]').forEach(input=>{
         input.addEventListener('change', ()=>{
           const field = input.dataset.field;
           const idx = state.tasks.findIndex(x=>x.key===t.key);
-          state.tasks[idx][field] = toISOFromInput(input.value);
+          state.tasks[idx][field] = toISODate(input.value);
           saveLocal();
         });
       });
-      // 事件：下拉
+
+      // 下拉
       tr.querySelectorAll('select[data-field]').forEach(sel=>{
         sel.addEventListener('change', ()=>{
           const field = sel.dataset.field;
           const idx = state.tasks.findIndex(x=>x.key===t.key);
           if(field==='sprint' && sel.value==='__NEW__'){
-            // 快速新增 Sprint
             const name = prompt('新增 Sprint 名稱？');
             if(name){
               const maxOrder = state.sprints.length? Math.max(...state.sprints.map(s=>s.order)) : 0;
@@ -643,30 +595,45 @@
           saveLocal(); renderAll();
         });
       });
-      // 事件：操作
+
+      // 操作
       tr.querySelector('[data-act="del"]').addEventListener('click', ()=> deleteTask(t.key));
       tr.querySelector('[data-act="dup"]').addEventListener('click', ()=>{
         const idx = state.tasks.findIndex(x=>x.key===t.key);
-        const dup = sanitizeTask({...state.tasks[idx], key: `NEW-${state.seq++}`, created:new Date().toISOString()});
+        const dup = sanitizeTask({...state.tasks[idx], key: `NEW-${state.seq++}`});
         state.tasks.splice(idx+1,0,dup);
-        saveLocal();
-        renderAll();
+        saveLocal(); renderAll();
       });
     });
   }
 
-  function renderSelect(field, current, list, placeholder=''){
-    const opts = (placeholder? [`<option value="">${escapeHTML(placeholder)}</option>`] : [])
-      .concat(list.map(s=>`<option value="${escapeAttr(s)}" ${s===current?'selected':''}>${escapeHTML(s)}</option>`)).join('');
-    return `<select data-field="${field}">${opts}</select>`;
+  function statusKey(s){
+    const x = (s||'').toLowerCase();
+    if(x.includes('progress')) return 'inprogress';
+    if(x.includes('done')||x.includes('完成')) return 'done';
+    if(x.includes('block')||x.includes('阻')) return 'blocked';
+    if(x.includes('review')||x.includes('審')) return 'review';
+    return 'todo';
   }
-
+  function renderStatusSelect(current, list){
+    const opts = list.map(s=>`<option value="${escapeAttr(s)}" ${s===current?'selected':''}>${escapeHTML(s)}</option>`).join('');
+    const color = statusKey(current);
+    return `<select class="status-select" data-color="${color}" data-field="status">${opts}</select>`;
+  }
   function renderSprintSelect(current){
     const names = state.sprints.map(s=>s.name);
     const opts = [`<option value="">（未指定）</option>`]
       .concat(names.map(n=>`<option value="${escapeAttr(n)}" ${n===current?'selected':''}>${escapeHTML(n)}</option>`))
       .concat([`<option value="__NEW__">+ 新增 Sprint…</option>`]).join('');
     return `<select data-field="sprint">${opts}</select>`;
+  }
+  function renderPeriodInputs(t){
+    const s = toLocalInputValue_date(t.start_date);
+    const e = toLocalInputValue_date(t.end_date);
+    return `<div class="period">
+      <input type="date" value="${s}" data-field="start_date"/> <span class="dash">–</span>
+      <input type="date" value="${e}" data-field="end_date"/>
+    </div>`;
   }
 
   // ------------------ 看板視圖 ------------------
@@ -698,6 +665,7 @@
         card.className = 'card';
         card.draggable = true;
         card.dataset.key = t.key;
+        const period = [toLocalInputValue_date(t.start_date), toLocalInputValue_date(t.end_date)].filter(Boolean).join(' – ');
         card.innerHTML = `
           <h4>${escapeHTML(t.summary)}</h4>
           <div class="meta">
@@ -705,6 +673,7 @@
             ${t.writer?`<span class="tag">✍️ ${escapeHTML(t.writer)}</span>`:''}
             ${t.type?`<span class="tag">🏷 ${escapeHTML(t.type)}</span>`:''}
             ${t.sprint?`<span class="tag">🌀 ${escapeHTML(t.sprint)}</span>`:''}
+            ${period?`<span class="tag">🗓 ${escapeHTML(period)}</span>`:''}
             ${(t.components||[]).map(c=>`<span class="tag">#${escapeHTML(c)}</span>`).join('')}
           </div>
           <div class="actions" style="margin-top:8px">
@@ -712,17 +681,12 @@
             <button class="btn danger" data-act="del">刪除</button>
           </div>
         `;
-        // DnD
         card.addEventListener('dragstart', (e)=>{ e.dataTransfer.setData('text/plain', t.key); card.classList.add('dragging'); });
         card.addEventListener('dragend', ()=> card.classList.remove('dragging'));
-        // 操作
         card.querySelector('[data-act="del"]').addEventListener('click', ()=> deleteTask(t.key));
         card.querySelector('[data-act="edit"]').addEventListener('click', ()=>{
           const newTitle = prompt('更新標題', t.summary || '');
-          if(newTitle!=null){
-            const idx = state.tasks.findIndex(x=>x.key===t.key);
-            state.tasks[idx].summary = newTitle.trim(); saveLocal(); renderAll();
-          }
+          if(newTitle!=null){ const idx = state.tasks.findIndex(x=>x.key===t.key); state.tasks[idx].summary = newTitle.trim(); saveLocal(); renderAll(); }
         });
         col.appendChild(card);
       }
@@ -738,14 +702,12 @@
     const filtered = applySort(applyFilters(state.tasks)).filter(t=> parseDate(t.start_date) && parseDate(t.end_date));
     if(filtered.length===0){ wrap.innerHTML = `<div class="empty">沒有可顯示的日期資料（需有開始與結束時間）。</div>`; return; }
 
-    // 計算時間範圍
     const min = new Date(Math.min(...filtered.map(t=> +parseDate(t.start_date))));
     const max = new Date(Math.max(...filtered.map(t=> +parseDate(t.end_date))));
     const dayMs = 86400000;
     const days = Math.ceil((max - min) / dayMs) + 1;
-    const pxPerDay = Math.max(6, Math.min(40, state.zoom * 4)); // 6~40px/day，更易讀
+    const pxPerDay = Math.max(6, Math.min(40, state.zoom * 4));
 
-    // 工具列
     const tools = document.createElement('div');
     tools.className = 'timeline-toolbar';
     tools.innerHTML = `
@@ -756,7 +718,6 @@
     `;
     wrap.appendChild(tools);
 
-    // 可捲動容器，包住 scale 與 area，同步寬度
     const scroller = document.createElement('div');
     scroller.className = 'timeline-scroller';
 
@@ -764,7 +725,6 @@
     scale.className = 'time-scale';
     scale.style.width = (days * pxPerDay) + 'px';
 
-    // 動態抽稀刻度標籤：約每 80px 顯示一次
     const step = Math.max(1, Math.round(80 / pxPerDay));
     for(let i=0;i<days;i++){
       const d = new Date(min.getTime()+i*dayMs);
@@ -779,7 +739,6 @@
     area.className = 'timeline';
     area.style.width = (days * pxPerDay) + 'px';
 
-    // Today 線
     const now = new Date();
     if(now>=min && now<=max){
       const x = Math.floor((now - min)/dayMs) * pxPerDay;
@@ -789,12 +748,11 @@
       area.appendChild(today);
     }
 
-    // 長條
     filtered.forEach((t, i)=>{
       const s = parseDate(t.start_date), e = parseDate(t.end_date);
       const x = Math.floor((s - min)/dayMs) * pxPerDay;
       const w = Math.max(pxPerDay, Math.ceil((e - s + dayMs)/dayMs) * pxPerDay);
-      const y = i * 38 + 36; // 每列高度
+      const y = i * 38 + 36;
       const bar = document.createElement('div');
       bar.className = 'bar';
       bar.style.left = x + 'px';
@@ -809,9 +767,7 @@
     scroller.appendChild(area);
     wrap.appendChild(scroller);
 
-    tools.querySelector('#zoom').addEventListener('input', (ev)=>{
-      state.zoom = Number(ev.target.value); saveLocal(); renderAll();
-    });
+    tools.querySelector('#zoom').addEventListener('input', (ev)=>{ state.zoom = Number(ev.target.value); saveLocal(); renderAll(); });
   }
 
   // ------------------ 共同渲染 ------------------
@@ -830,7 +786,6 @@
     el.fType.value = state.filters.type || '';
     el.fSprint.value = state.filters.sprint || '';
 
-    // 排序下拉同步
     el.fSort.value = state.sort.by ? `${state.sort.by}.${state.sort.dir}` : '';
   }
 
@@ -846,17 +801,21 @@
     if(state.view==='table'){ el.viewTable.style.display='block'; renderTable(); }
     else if(state.view==='kanban'){ el.viewKanban.style.display='block'; renderKanban(); }
     else { el.viewTimeline.style.display='block'; renderTimeline(); }
+
+    // 動態著色：狀態 select
+    document.querySelectorAll('.status-select').forEach(sel=>{
+      const setColor = ()=> sel.setAttribute('data-color', statusKey(sel.value));
+      sel.addEventListener('change', setColor);
+      setColor();
+    });
   }
 
   // ------------------ 安全字串 ------------------
-  function escapeHTML(str){
-    return String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
-  }
+  function escapeHTML(str){ return String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s])); }
   function escapeAttr(str){ return escapeHTML(str).replace(/"/g,'&quot;'); }
 
   // ------------------ 初始化 ------------------
   loadLocal();
-  // 與舊版相容：若尚未有 sprints，從 tasks 建立一次
   if(state.sprints.length===0) bootstrapSprintsFromTasks();
   renderAll();
   </script>
