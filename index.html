@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>JSON 可視化編輯器｜單檔 HTML（含 Sprint 管理）</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111825;
+      --muted: #7a8699;
+      --text: #e6edf3;
+      --primary: #4f9cff;
+      --accent: #10b981;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --border: #1f2a37;
+      --card: #0f1722;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+    }
+    * { box-sizing: border-box }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--text); }
+    header { position: sticky; top: 0; z-index: 40; background: linear-gradient(180deg, rgba(15,23,34,.95), rgba(15,23,34,.85)); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border);
+      padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+    .title { font-weight: 700; letter-spacing: .2px; display: flex; gap: 10px; align-items: center }
+    .title small { color: var(--muted); font-weight: 500 }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end }
+    .btn { background: #0e1624; border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 10px; cursor: pointer; transition: .15s ease; box-shadow: var(--shadow) }
+    .btn:hover { border-color: #2b3b52; transform: translateY(-1px) }
+    .btn.primary { background: var(--primary); color: #06111f; border-color: transparent; font-weight: 700 }
+    .btn.success { background: var(--accent); color: #04110c; border-color: transparent; font-weight: 700 }
+    .btn.warning { background: var(--warn); color: #1d1201; border-color: transparent; font-weight: 700 }
+    .btn.danger { background: var(--danger); color: #1a0707; border-color: transparent; font-weight: 700 }
+    .btn.ghost { background: transparent; border-style: dashed; }
+    .seg { display:flex; border:1px solid var(--border); border-radius: 12px; overflow:hidden }
+    .seg button{ padding:8px 12px; border:0; background:transparent; color:var(--muted); cursor:pointer; font-weight:700 }
+    .seg button.active{ background: var(--primary); color:#06111f }
+
+    .wrap { padding: 16px; max-width: 1400px; margin: 0 auto }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 14px; box-shadow: var(--shadow) }
+    .filters { display: grid; grid-template-columns: 1fr repeat(7, minmax(160px, 220px)); gap: 10px }
+    .input, select { width: 100%; border: 1px solid var(--border); background: #0b1320; color: var(--text); padding: 10px 12px; border-radius: 10px }
+    .tag { display:inline-flex; align-items:center; gap:8px; background:#0d1728; border:1px solid var(--border); padding:4px 8px; border-radius:999px; color: var(--muted) }
+
+    /* Table View */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid var(--border); padding: 10px; text-align: left; vertical-align: top }
+    th { color: var(--muted); font-weight: 700; position: sticky; top: 66px; background: var(--panel); z-index: 10; cursor: pointer }
+    th .sort { opacity:.5; font-size: 11px; margin-left:6px }
+    td[contenteditable="true"] { outline: none; border-radius: 8px }
+    td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px var(--primary); background: #0a1422 }
+    .actions { display:flex; gap:8px }
+
+    /* Kanban */
+    .kanban { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 12px; align-items: start }
+    .col { background: var(--panel); border: 1px dashed var(--border); border-radius: 14px; padding: 10px; min-height: 60vh }
+    .col h3 { margin: 4px 4px 10px; font-size: 14px; color: var(--muted); display:flex; align-items:center; justify-content: space-between }
+    .col .count { font-weight: 800; color: var(--primary) }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 10px; margin: 8px 0; cursor: grab; box-shadow: var(--shadow) }
+    .card.dragging { opacity: .6; transform: rotate(1deg) }
+    .card h4 { margin: 0 0 6px; font-size: 15px }
+    .meta { display: flex; gap: 6px; flex-wrap: wrap }
+
+    /* Timeline */
+    .timeline-wrap { border:1px solid var(--border); border-radius: 14px; padding: 8px; background: var(--panel); }
+    .timeline-toolbar { display:flex; gap:10px; align-items:center; justify-content:flex-end; margin-bottom: 8px }
+    .timeline-scroller{ overflow:auto; border-radius: 10px; background:#0c1524; position:relative }
+    .timeline { position: relative; min-height: 420px; background: repeating-linear-gradient(90deg, #0e1a2e 0 1px, transparent 1px 100px); }
+    .time-scale { position: sticky; top: 0; background: #0c1524; border-bottom: 1px solid var(--border); z-index: 5; display: flex; gap: 0 }
+    .time-scale div { padding: 4px 8px; border-right: 1px solid var(--border); color: var(--muted); font-size: 12px; min-width: 100px; text-align:center }
+    .bar { position: absolute; height: 30px; border-radius: 8px; border:1px solid var(--border); background: linear-gradient(180deg, #11253c, #0c1a2d); display:flex; align-items:center; gap:8px; padding: 0 10px; white-space: nowrap }
+    .bar .key { font-weight: 800; color: var(--primary) }
+    .today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); opacity: .7 }
+
+    .empty { color: var(--muted); text-align: center; padding: 40px 0 }
+
+    /* Sprint 管理彈窗 */
+    dialog.modal { border:1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 16px; width: min(720px, 96vw); box-shadow: var(--shadow); }
+    dialog::backdrop{ background: rgba(0,0,0,.5) }
+    .modal-head{ display:flex; align-items:center; justify-content:space-between; padding: 10px 14px; border-bottom:1px solid var(--border) }
+    .modal-body{ padding: 12px 14px; display:grid; gap: 8px }
+    .srow{ display:grid; grid-template-columns: 1fr 160px 160px 80px; gap: 8px; align-items:center }
+    .drag-handle{ cursor: grab; user-select:none; padding:4px 8px; border:1px dashed var(--border); border-radius:8px; text-align:center; opacity:.8 }
+
+    @media (max-width: 980px){
+      .filters { grid-template-columns: 1fr 1fr; }
+      .kanban { grid-template-columns: 1fr }
+      th { top: 114px }
+      .srow{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3L2 8l10 5 10-5-10-5Zm0 7L2 5m10 5 10-5M2 13l10 5 10-5" stroke="#4f9cff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div>
+        JSON 可視化編輯器
+        <small>單檔 HTML · 匯入 → 編輯 → 匯出</small>
+      </div>
+    </div>
+    <div class="toolbar">
+      <input id="fileInput" type="file" accept="application/json" style="display:none" />
+      <button class="btn" id="btnOpen">載入 JSON</button>
+      <button class="btn ghost" id="btnAdd">新增任務</button>
+      <button class="btn" id="btnSprint">管理 Sprint</button>
+      <button class="btn success" id="btnExport">匯出 JSON</button>
+      <div class="seg">
+        <button data-view="table" class="active" title="表格">表格</button>
+        <button data-view="kanban" title="看板">看板</button>
+        <button data-view="timeline" title="時間軸">時間軸</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" style="margin-bottom:12px">
+      <div class="filters">
+        <input id="q" class="input" placeholder="搜尋：關鍵字、Key、作者… (Enter 篩選)" />
+        <select id="fStatus"><option value="">全部狀態</option></select>
+        <select id="fWriter"><option value="">全部作者</option></select>
+        <select id="fComponent"><option value="">全部組件</option></select>
+        <select id="fType"><option value="">全部類型</option></select>
+        <select id="fSprint"><option value="">全部 Sprint</option></select>
+        <select id="fSort">
+          <option value="">排序：預設</option>
+          <option value="key.asc">Key ↑</option>
+          <option value="key.desc">Key ↓</option>
+          <option value="summary.asc">標題 ↑</option>
+          <option value="summary.desc">標題 ↓</option>
+          <option value="status.asc">狀態 ↑</option>
+          <option value="status.desc">狀態 ↓</option>
+          <option value="type.asc">類型 ↑</option>
+          <option value="type.desc">類型 ↓</option>
+          <option value="sprint.asc">Sprint（自定序）↑</option>
+          <option value="sprint.desc">Sprint（自定序）↓</option>
+          <option value="start_date.asc">開始時間 ↑</option>
+          <option value="start_date.desc">開始時間 ↓</option>
+          <option value="end_date.asc">結束時間 ↑</option>
+          <option value="end_date.desc">結束時間 ↓</option>
+          <option value="created.asc">建立時間 ↑</option>
+          <option value="created.desc">建立時間 ↓</option>
+        </select>
+      </div>
+    </section>
+
+    <section id="view-table" class="panel view"></section>
+    <section id="view-kanban" class="panel view" style="display:none"></section>
+    <section id="view-timeline" class="panel view" style="display:none"></section>
+  </main>
+
+  <template id="tableTpl">
+    <table>
+      <thead>
+        <tr>
+          <th data-sort="key">Key <span class="sort">⇅</span></th>
+          <th data-sort="summary">標題 <span class="sort">⇅</span></th>
+          <th data-sort="status" style="width:160px">狀態 <span class="sort">⇅</span></th>
+          <th data-sort="type" style="width:120px">類型 <span class="sort">⇅</span></th>
+          <th data-sort="components">組件 <span class="sort">⇅</span></th>
+          <th data-sort="writer" style="width:140px">作者 <span class="sort">⇅</span></th>
+          <th data-sort="sprint" style="width:180px">Sprint <span class="sort">⇅</span></th>
+          <th data-sort="start_date" style="width:210px">開始時間 <span class="sort">⇅</span></th>
+          <th data-sort="end_date" style="width:210px">結束時間 <span class="sort">⇅</span></th>
+          <th data-sort="created" style="width:150px">建立時間 <span class="sort">⇅</span></th>
+          <th style="width:120px">操作</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </template>
+
+  <dialog id="dlgSprint" class="modal">
+    <form method="dialog">
+      <div class="modal-head">
+        <strong>管理 Sprint</strong>
+        <div style="display:flex; gap:8px">
+          <button id="btnAddSprint" type="button" class="btn ghost">+ 新增 Sprint</button>
+          <button class="btn">關閉</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        <div class="srow" style="color:var(--muted)">
+          <div>名稱</div>
+          <div>開始</div>
+          <div>結束</div>
+          <div>排序</div>
+        </div>
+        <div id="sprintRows" style="display:grid; gap:6px"></div>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+  // ------------------ 基本狀態 ------------------
+  const state = {
+    tasks: [], // 原始資料
+    view: 'table',
+    filters: { q:'', status:'', writer:'', component:'', type:'', sprint:'' },
+    sort: { by:'', dir:'asc' },
+    zoom: 5, // timeline 每天像素（1~10）
+    seq: 1,
+    // 新增：Sprint 管理
+    sprints: [], // {id,name,start,end,order}
+  };
+
+  const el = {
+    file: document.getElementById('fileInput'),
+    btnOpen: document.getElementById('btnOpen'),
+    btnAdd: document.getElementById('btnAdd'),
+    btnSprint: document.getElementById('btnSprint'),
+    btnExport: document.getElementById('btnExport'),
+    viewTable: document.getElementById('view-table'),
+    viewKanban: document.getElementById('view-kanban'),
+    viewTimeline: document.getElementById('view-timeline'),
+    q: document.getElementById('q'),
+    fStatus: document.getElementById('fStatus'),
+    fWriter: document.getElementById('fWriter'),
+    fComponent: document.getElementById('fComponent'),
+    fType: document.getElementById('fType'),
+    fSprint: document.getElementById('fSprint'),
+    fSort: document.getElementById('fSort'),
+    dlgSprint: document.getElementById('dlgSprint'),
+    sprintRows: document.getElementById('sprintRows'),
+    btnAddSprint: document.getElementById('btnAddSprint'),
+  };
+
+  // ------------------ 工具函式 ------------------
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+  const compact = (x) => (Array.isArray(x) ? x.filter(Boolean) : []);
+  const uid = () => Math.random().toString(36).slice(2,10);
+
+  function parseDate(str){
+    if(!str) return null; // 支援 ISO 或任何 Date 可解析字串
+    const d = new Date(str);
+    return isNaN(d) ? null : d;
+  }
+  function toLocalInputValue(str){
+    const d = parseDate(str); if(!d) return '';
+    const pad = (n)=> String(n).padStart(2,'0');
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth()+1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  }
+  function toISOFromInput(v){
+    if(!v) return '';
+    const d = new Date(v);
+    return isNaN(d) ? '' : d.toISOString();
+  }
+
+  function sanitizeTask(t){
+    const s = {
+      key: t.key || `NEW-${state.seq++}`,
+      summary: t.summary ?? '',
+      status: t.status || 'To Do',
+      type: t.type || '',
+      epic_link: t.epic_link ?? null,
+      components: Array.isArray(t.components) ? t.components : compact(String(t.components||'').split(',').map(s=>s.trim())),
+      writer: t.writer || '',
+      fix_versions: Array.isArray(t.fix_versions) ? t.fix_versions : [],
+      sprint: t.sprint || '',
+      created: t.created || new Date().toISOString(),
+      start_date: t.start_date || '',
+      end_date: t.end_date || '',
+    };
+    return s;
+  }
+
+  // Sprint 物件：名稱去前後空白；確保唯一 id
+  function sanitizeSprint(s){
+    return {
+      id: s.id || uid(),
+      name: (s.name||'').trim(),
+      start: s.start || '',
+      end: s.end || '',
+      order: typeof s.order==='number' ? s.order : Number.MAX_SAFE_INTEGER,
+    }
+  }
+
+  // 將既有任務中的 sprint 字串匯入為 Sprint 物件（初次載入或缺少定義時）
+  function bootstrapSprintsFromTasks(){
+    const names = uniq(state.tasks.map(t=>t.sprint));
+    const existingNames = new Set(state.sprints.map(s=>s.name));
+    const nextOrder = (state.sprints.length ? Math.max(...state.sprints.map(s=>s.order)) + 1 : 1);
+    let o = nextOrder;
+    for(const n of names){
+      if(!n) continue;
+      if(!existingNames.has(n)){
+        state.sprints.push(sanitizeSprint({name:n, order:o++}));
+      }
+    }
+    // 依 order 排好
+    state.sprints.sort((a,b)=>a.order-b.order);
+  }
+
+  // 自然排序（處理 Sprint 1、Sprint 2… 字串）
+  function naturalCompare(a,b){
+    return a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' });
+  }
+
+  function sprintIndexByName(name){
+    const i = state.sprints.findIndex(s=>s.name===name);
+    return i===-1 ? Number.MAX_SAFE_INTEGER : i; // 未定義的排最後
+  }
+
+  function applyFilters(list){
+    const {q,status,writer,component,type,sprint} = state.filters;
+    const Q = (q||'').toLowerCase();
+    return list.filter(t => {
+      const okQ = !Q || [t.key, t.summary, t.writer, t.type, t.sprint, ...(t.components||[])].join(' ').toLowerCase().includes(Q);
+      const okS = !status || t.status === status;
+      const okW = !writer || t.writer === writer;
+      const okC = !component || (t.components||[]).includes(component);
+      const okT = !type || t.type === type;
+      const okSp = !sprint || t.sprint === sprint;
+      return okQ && okS && okW && okC && okT && okSp;
+    });
+  }
+
+  function applySort(list){
+    const {by, dir} = state.sort;
+    if(!by) return list;
+    const sign = dir==='desc' ? -1 : 1;
+    const val = (t)=>{
+      if(by==='sprint') return sprintIndexByName(t.sprint);
+      if(by.endsWith('date') || by==='created') return parseDate(t[by])?.getTime() || 0;
+      if(by==='components') return (t.components||[]).join(',');
+      return (t[by] ?? '').toString().toLowerCase();
+    };
+    // sprint 相同時用自然排序備援
+    return clone(list).sort((a,b)=>{
+      const va = val(a), vb = val(b);
+      if(by==='sprint' && va===vb){
+        return naturalCompare(a.sprint||'', b.sprint||'') * sign;
+      }
+      return (va>vb?1:va<vb?-1:0) * sign;
+    });
+  }
+
+  function gatherMeta(list){
+    const statuses = uniq(list.map(t=>t.status).concat(['To Do','In Progress','Done']));
+    const writers = uniq(list.map(t=>t.writer));
+    const comps = uniq(list.flatMap(t=>t.components||[]));
+    const types = uniq(list.map(t=>t.type));
+    // Sprint 選單以 state.sprints 為準（確保一致性與排序）
+    const sprints = state.sprints.map(s=>s.name);
+    return {statuses, writers, comps, types, sprints};
+  }
+
+  // ------------------ 匯入 / 匯出 ------------------
+  el.btnOpen.addEventListener('click', ()=> el.file.click());
+  el.file.addEventListener('change', (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{
+        const json = JSON.parse(reader.result);
+        if(!Array.isArray(json)) throw new Error('JSON 需要是陣列');
+        state.tasks = json.map(sanitizeTask);
+        // 任務載入後同步 Sprint 清單
+        bootstrapSprintsFromTasks();
+        saveLocal();
+        renderAll();
+      }catch(err){
+        alert('讀取失敗：' + err.message);
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  el.btnExport.addEventListener('click', ()=>{
+    const data = JSON.stringify({ tasks: state.tasks, sprints: state.sprints }, null, 2);
+    const blob = new Blob([data], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `export_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  function saveLocal(){ localStorage.setItem('json-editor-state', JSON.stringify(state)); }
+  function loadLocal(){
+    try{
+      const raw = localStorage.getItem('json-editor-state');
+      if(!raw) return;
+      const s = JSON.parse(raw);
+      if(Array.isArray(s.tasks)) state.tasks = s.tasks.map(sanitizeTask);
+      if(s.filters) state.filters = {...state.filters, ...s.filters};
+      if(s.view) state.view = s.view;
+      if(s.zoom) state.zoom = s.zoom;
+      if(s.sort) state.sort = s.sort;
+      if(Array.isArray(s.sprints)) state.sprints = s.sprints.map(sanitizeSprint);
+      // 若使用舊版 state（沒有 sprints），從 tasks 建立一次
+      if(!Array.isArray(s.sprints)) bootstrapSprintsFromTasks();
+    }catch{}
+  }
+
+  // ------------------ 篩選器 & 排序 ------------------
+  ;[el.q, el.fStatus, el.fWriter, el.fComponent, el.fType, el.fSprint].forEach((node)=>{
+    node.addEventListener('change', ()=>{
+      state.filters.q = el.q.value.trim();
+      state.filters.status = el.fStatus.value;
+      state.filters.writer = el.fWriter.value;
+      state.filters.component = el.fComponent.value;
+      state.filters.type = el.fType.value;
+      state.filters.sprint = el.fSprint.value;
+      saveLocal();
+      renderAll();
+    });
+    node.addEventListener('keydown', (ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); node.blur(); }});
+  });
+
+  el.fSort.addEventListener('change', ()=>{
+    const v = el.fSort.value; // e.g. key.asc
+    if(!v){ state.sort = {by:'',dir:'asc'}; }
+    else{
+      const [by, dir] = v.split('.');
+      state.sort = {by, dir};
+    }
+    saveLocal();
+    renderAll();
+  });
+
+  // ------------------ 視圖切換 ------------------
+  document.querySelectorAll('.seg button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      document.querySelectorAll('.seg button').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      state.view = btn.dataset.view;
+      saveLocal();
+      renderAll();
+    });
+  });
+
+  // ------------------ 新增任務 ------------------
+  el.btnAdd.addEventListener('click', ()=>{
+    const t = sanitizeTask({ summary: '（新任務）', status: 'To Do', type: 'Task', writer: '', components: [], sprint: '' });
+    state.tasks.unshift(t);
+    saveLocal();
+    renderAll();
+  });
+
+  function deleteTask(key){
+    if(!confirm(`刪除 ${key} ？`)) return;
+    state.tasks = state.tasks.filter(t=>t.key!==key);
+    saveLocal();
+    renderAll();
+  }
+
+  // ------------------ Sprint 管理 ------------------
+  el.btnSprint.addEventListener('click', ()=>{
+    openSprintDialog();
+  });
+
+  function openSprintDialog(){
+    renderSprintRows();
+    el.dlgSprint.showModal();
+  }
+
+  el.btnAddSprint.addEventListener('click', ()=>{
+    const maxOrder = state.sprints.length? Math.max(...state.sprints.map(s=>s.order)) : 0;
+    state.sprints.push(sanitizeSprint({ name: `Sprint ${state.sprints.length+1}`, order: maxOrder+1 }));
+    saveLocal();
+    renderSprintRows();
+    renderAll();
+  });
+
+  function renderSprintRows(){
+    el.sprintRows.innerHTML = '';
+    // 確保依 order 顯示
+    state.sprints.sort((a,b)=>a.order-b.order);
+
+    state.sprints.forEach((s, idx)=>{
+      const row = document.createElement('div');
+      row.className = 'srow';
+      row.draggable = true;
+      row.dataset.id = s.id;
+      row.innerHTML = `
+        <input type="text" value="${escapeAttr(s.name)}" placeholder="名稱" data-field="name" />
+        <input type="date" value="${toLocalDate(s.start)}" data-field="start" />
+        <input type="date" value="${toLocalDate(s.end)}" data-field="end" />
+        <div class="drag-handle" title="拖曳排序">⇅</div>
+      `;
+      el.sprintRows.appendChild(row);
+
+      // 編輯事件
+      row.querySelectorAll('input').forEach(inp=>{
+        inp.addEventListener('change', ()=>{
+          const f = inp.dataset.field;
+          const i = state.sprints.findIndex(x=>x.id===s.id);
+          if(f==='name') state.sprints[i].name = inp.value.trim();
+          if(f==='start') state.sprints[i].start = toISODate(inp.value);
+          if(f==='end') state.sprints[i].end = toISODate(inp.value);
+          saveLocal();
+          renderAll();
+        });
+      });
+
+      // DnD 排序（以 order 儲存）
+      row.addEventListener('dragstart', ev=>{
+        ev.dataTransfer.setData('text/plain', s.id);
+      });
+      row.addEventListener('dragover', ev=>{ ev.preventDefault(); row.style.background = '#0f1b2c'; });
+      row.addEventListener('dragleave', ()=> row.style.background = 'transparent');
+      row.addEventListener('drop', ev=>{
+        ev.preventDefault(); row.style.background = 'transparent';
+        const fromId = ev.dataTransfer.getData('text/plain');
+        const toId = s.id;
+        if(fromId===toId) return;
+        reorderSprintsById(fromId, toId);
+        saveLocal();
+        renderSprintRows();
+        renderAll();
+      });
+
+      // 右鍵刪除
+      row.addEventListener('contextmenu', (ev)=>{
+        ev.preventDefault();
+        if(confirm(`刪除 Sprint「${s.name}」？\n（不會刪除任務，只會清空任務上的 sprint 欄位）`)){
+          // 將任務中使用該 sprint 的清空
+          state.tasks = state.tasks.map(t=> t.sprint===s.name ? {...t, sprint:''} : t);
+          state.sprints = state.sprints.filter(x=>x.id!==s.id);
+          saveLocal();
+          renderSprintRows();
+          renderAll();
+        }
+      });
+    });
+  }
+
+  function reorderSprintsById(fromId, toId){
+    const arr = state.sprints;
+    const from = arr.findIndex(s=>s.id===fromId);
+    const to = arr.findIndex(s=>s.id===toId);
+    if(from===-1 || to===-1) return;
+    const [moved] = arr.splice(from,1);
+    arr.splice(to,0,moved);
+    // 重新編 order
+    arr.forEach((s,i)=> s.order = i+1);
+  }
+
+  function toLocalDate(str){
+    const d = parseDate(str); if(!d) return '';
+    const pad = (n)=> String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  function toISODate(v){
+    if(!v) return '';
+    const d = new Date(v);
+    if(isNaN(d)) return '';
+    // 只取 YYYY-MM-DD，避免時區偏移
+    const [y,m,da] = v.split('-');
+    return new Date(Number(y), Number(m)-1, Number(da)).toISOString();
+  }
+
+  // ------------------ 表格視圖 ------------------
+  function renderTable(){
+    const wrap = el.viewTable; wrap.innerHTML = '';
+    const tpl = document.getElementById('tableTpl').content.cloneNode(true);
+    wrap.appendChild(tpl);
+
+    const thead = wrap.querySelector('thead');
+    thead.querySelectorAll('th[data-sort]').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const by = th.dataset.sort;
+        const dir = (state.sort.by===by && state.sort.dir==='asc') ? 'desc' : 'asc';
+        state.sort = {by, dir}; saveLocal(); renderAll();
+      });
+    });
+
+    const tbody = wrap.querySelector('tbody');
+    const rows = applySort(applyFilters(state.tasks));
+
+    if(rows.length===0){ wrap.innerHTML = `<div class="empty">沒有資料，請先「載入 JSON」或「新增任務」。</div>`; return; }
+
+    const meta = gatherMeta(state.tasks);
+
+    rows.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${escapeHTML(t.key)}</td>
+        <td contenteditable="true" data-field="summary">${escapeHTML(t.summary)}</td>
+        <td>${renderSelect('status', t.status, meta.statuses)}</td>
+        <td contenteditable="true" data-field="type">${escapeHTML(t.type)}</td>
+        <td contenteditable="true" data-field="components">${escapeHTML((t.components||[]).join(', '))}</td>
+        <td contenteditable="true" data-field="writer">${escapeHTML(t.writer)}</td>
+        <td>${renderSprintSelect(t.sprint)}</td>
+        <td><input type="datetime-local" value="${toLocalInputValue(t.start_date)}" data-field="start_date"/></td>
+        <td><input type="datetime-local" value="${toLocalInputValue(t.end_date)}" data-field="end_date"/></td>
+        <td>${escapeHTML(new Date(t.created).toLocaleString())}</td>
+        <td class="actions">
+          <button class="btn warning" data-act="dup">複製</button>
+          <button class="btn danger" data-act="del">刪除</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+
+      // 事件：文字欄位
+      tr.querySelectorAll('[contenteditable="true"]').forEach(cell => {
+        cell.addEventListener('blur', ()=>{
+          const field = cell.dataset.field;
+          const val = cell.textContent.trim();
+          const idx = state.tasks.findIndex(x=>x.key===t.key);
+          if(field==='components'){
+            state.tasks[idx].components = compact(val.split(',').map(s=>s.trim()));
+          }else{
+            state.tasks[idx][field] = val;
+          }
+          saveLocal();
+        });
+      });
+      // 事件：日期欄位
+      tr.querySelectorAll('input[type="datetime-local"]').forEach(input=>{
+        input.addEventListener('change', ()=>{
+          const field = input.dataset.field;
+          const idx = state.tasks.findIndex(x=>x.key===t.key);
+          state.tasks[idx][field] = toISOFromInput(input.value);
+          saveLocal();
+        });
+      });
+      // 事件：下拉
+      tr.querySelectorAll('select[data-field]').forEach(sel=>{
+        sel.addEventListener('change', ()=>{
+          const field = sel.dataset.field;
+          const idx = state.tasks.findIndex(x=>x.key===t.key);
+          if(field==='sprint' && sel.value==='__NEW__'){
+            // 快速新增 Sprint
+            const name = prompt('新增 Sprint 名稱？');
+            if(name){
+              const maxOrder = state.sprints.length? Math.max(...state.sprints.map(s=>s.order)) : 0;
+              const sp = sanitizeSprint({name: name.trim(), order: maxOrder+1});
+              state.sprints.push(sp);
+              state.tasks[idx].sprint = sp.name;
+            }
+          }else{
+            state.tasks[idx][field] = sel.value;
+          }
+          saveLocal(); renderAll();
+        });
+      });
+      // 事件：操作
+      tr.querySelector('[data-act="del"]').addEventListener('click', ()=> deleteTask(t.key));
+      tr.querySelector('[data-act="dup"]').addEventListener('click', ()=>{
+        const idx = state.tasks.findIndex(x=>x.key===t.key);
+        const dup = sanitizeTask({...state.tasks[idx], key: `NEW-${state.seq++}`, created:new Date().toISOString()});
+        state.tasks.splice(idx+1,0,dup);
+        saveLocal();
+        renderAll();
+      });
+    });
+  }
+
+  function renderSelect(field, current, list, placeholder=''){
+    const opts = (placeholder? [`<option value="">${escapeHTML(placeholder)}</option>`] : [])
+      .concat(list.map(s=>`<option value="${escapeAttr(s)}" ${s===current?'selected':''}>${escapeHTML(s)}</option>`)).join('');
+    return `<select data-field="${field}">${opts}</select>`;
+  }
+
+  function renderSprintSelect(current){
+    const names = state.sprints.map(s=>s.name);
+    const opts = [`<option value="">（未指定）</option>`]
+      .concat(names.map(n=>`<option value="${escapeAttr(n)}" ${n===current?'selected':''}>${escapeHTML(n)}</option>`))
+      .concat([`<option value="__NEW__">+ 新增 Sprint…</option>`]).join('');
+    return `<select data-field="sprint">${opts}</select>`;
+  }
+
+  // ------------------ 看板視圖 ------------------
+  function renderKanban(){
+    const wrap = el.viewKanban; wrap.innerHTML = '';
+    const meta = gatherMeta(state.tasks);
+    wrap.style.setProperty('--cols', meta.statuses.length);
+
+    const filtered = applySort(applyFilters(state.tasks));
+    meta.statuses.forEach(st => {
+      const col = document.createElement('div');
+      col.className = 'col';
+      col.dataset.status = st;
+      const items = filtered.filter(t=>t.status===st);
+      col.innerHTML = `<h3><span>${escapeHTML(st)}</span><span class="count">${items.length}</span></h3>`;
+      wrap.appendChild(col);
+
+      col.addEventListener('dragover', (e)=>{ e.preventDefault(); col.style.background = '#0f1b2c'; });
+      col.addEventListener('dragleave', ()=>{ col.style.background = 'var(--panel)'; });
+      col.addEventListener('drop', (e)=>{
+        e.preventDefault(); col.style.background = 'var(--panel)';
+        const key = e.dataTransfer.getData('text/plain');
+        const idx = state.tasks.findIndex(t=>t.key===key);
+        if(idx>-1){ state.tasks[idx].status = st; saveLocal(); renderAll(); }
+      });
+
+      for(const t of items){
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.draggable = true;
+        card.dataset.key = t.key;
+        card.innerHTML = `
+          <h4>${escapeHTML(t.summary)}</h4>
+          <div class="meta">
+            <span class="tag"><strong class="key">${escapeHTML(t.key)}</strong></span>
+            ${t.writer?`<span class="tag">✍️ ${escapeHTML(t.writer)}</span>`:''}
+            ${t.type?`<span class="tag">🏷 ${escapeHTML(t.type)}</span>`:''}
+            ${t.sprint?`<span class="tag">🌀 ${escapeHTML(t.sprint)}</span>`:''}
+            ${(t.components||[]).map(c=>`<span class="tag">#${escapeHTML(c)}</span>`).join('')}
+          </div>
+          <div class="actions" style="margin-top:8px">
+            <button class="btn" data-act="edit">編輯</button>
+            <button class="btn danger" data-act="del">刪除</button>
+          </div>
+        `;
+        // DnD
+        card.addEventListener('dragstart', (e)=>{ e.dataTransfer.setData('text/plain', t.key); card.classList.add('dragging'); });
+        card.addEventListener('dragend', ()=> card.classList.remove('dragging'));
+        // 操作
+        card.querySelector('[data-act="del"]').addEventListener('click', ()=> deleteTask(t.key));
+        card.querySelector('[data-act="edit"]').addEventListener('click', ()=>{
+          const newTitle = prompt('更新標題', t.summary || '');
+          if(newTitle!=null){
+            const idx = state.tasks.findIndex(x=>x.key===t.key);
+            state.tasks[idx].summary = newTitle.trim(); saveLocal(); renderAll();
+          }
+        });
+        col.appendChild(card);
+      }
+    });
+
+    if(!wrap.children.length){ wrap.innerHTML = `<div class="empty">沒有符合條件的卡片。</div>`; }
+  }
+
+  // ------------------ 時間軸視圖 ------------------
+  function renderTimeline(){
+    const wrap = el.viewTimeline; wrap.innerHTML = '';
+
+    const filtered = applySort(applyFilters(state.tasks)).filter(t=> parseDate(t.start_date) && parseDate(t.end_date));
+    if(filtered.length===0){ wrap.innerHTML = `<div class="empty">沒有可顯示的日期資料（需有開始與結束時間）。</div>`; return; }
+
+    // 計算時間範圍
+    const min = new Date(Math.min(...filtered.map(t=> +parseDate(t.start_date))));
+    const max = new Date(Math.max(...filtered.map(t=> +parseDate(t.end_date))));
+    const dayMs = 86400000;
+    const days = Math.ceil((max - min) / dayMs) + 1;
+    const pxPerDay = Math.max(6, Math.min(40, state.zoom * 4)); // 6~40px/day，更易讀
+
+    // 工具列
+    const tools = document.createElement('div');
+    tools.className = 'timeline-toolbar';
+    tools.innerHTML = `
+      <span class="tag">範圍：${min.toLocaleDateString()} ~ ${max.toLocaleDateString()}</span>
+      <label class="tag" style="gap:6px">縮放
+        <input id="zoom" type="range" min="1" max="10" step="1" value="${state.zoom}" style="accent-color: var(--primary)" />
+      </label>
+    `;
+    wrap.appendChild(tools);
+
+    // 可捲動容器，包住 scale 與 area，同步寬度
+    const scroller = document.createElement('div');
+    scroller.className = 'timeline-scroller';
+
+    const scale = document.createElement('div');
+    scale.className = 'time-scale';
+    scale.style.width = (days * pxPerDay) + 'px';
+
+    // 動態抽稀刻度標籤：約每 80px 顯示一次
+    const step = Math.max(1, Math.round(80 / pxPerDay));
+    for(let i=0;i<days;i++){
+      const d = new Date(min.getTime()+i*dayMs);
+      const lab = (i % step === 0) ? `${d.getMonth()+1}/${d.getDate()}` : '';
+      const cell = document.createElement('div');
+      cell.style.minWidth = cell.style.width = (pxPerDay)+'px';
+      cell.textContent = lab;
+      scale.appendChild(cell);
+    }
+
+    const area = document.createElement('div');
+    area.className = 'timeline';
+    area.style.width = (days * pxPerDay) + 'px';
+
+    // Today 線
+    const now = new Date();
+    if(now>=min && now<=max){
+      const x = Math.floor((now - min)/dayMs) * pxPerDay;
+      const today = document.createElement('div');
+      today.className = 'today';
+      today.style.left = x+'px';
+      area.appendChild(today);
+    }
+
+    // 長條
+    filtered.forEach((t, i)=>{
+      const s = parseDate(t.start_date), e = parseDate(t.end_date);
+      const x = Math.floor((s - min)/dayMs) * pxPerDay;
+      const w = Math.max(pxPerDay, Math.ceil((e - s + dayMs)/dayMs) * pxPerDay);
+      const y = i * 38 + 36; // 每列高度
+      const bar = document.createElement('div');
+      bar.className = 'bar';
+      bar.style.left = x + 'px';
+      bar.style.top = y + 'px';
+      bar.style.width = w + 'px';
+      bar.title = `${t.key} ${t.summary}`;
+      bar.innerHTML = `<span class="key">${escapeHTML(t.key)}</span> ${escapeHTML(t.summary)}${t.sprint?` — <em>${escapeHTML(t.sprint)}</em>`:''}`;
+      area.appendChild(bar);
+    });
+
+    scroller.appendChild(scale);
+    scroller.appendChild(area);
+    wrap.appendChild(scroller);
+
+    tools.querySelector('#zoom').addEventListener('input', (ev)=>{
+      state.zoom = Number(ev.target.value); saveLocal(); renderAll();
+    });
+  }
+
+  // ------------------ 共同渲染 ------------------
+  function renderFilters(){
+    const meta = gatherMeta(state.tasks);
+    fillSelect(el.fStatus, meta.statuses, '全部狀態');
+    fillSelect(el.fWriter, meta.writers, '全部作者');
+    fillSelect(el.fComponent, meta.comps, '全部組件');
+    fillSelect(el.fType, meta.types, '全部類型');
+    fillSelect(el.fSprint, meta.sprints, '全部 Sprint');
+
+    el.q.value = state.filters.q || '';
+    el.fStatus.value = state.filters.status || '';
+    el.fWriter.value = state.filters.writer || '';
+    el.fComponent.value = state.filters.component || '';
+    el.fType.value = state.filters.type || '';
+    el.fSprint.value = state.filters.sprint || '';
+
+    // 排序下拉同步
+    el.fSort.value = state.sort.by ? `${state.sort.by}.${state.sort.dir}` : '';
+  }
+
+  function fillSelect(sel, options, placeholder){
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${placeholder}</option>` + options.map(o=>`<option value="${escapeAttr(o)}">${escapeHTML(o)}</option>`).join('');
+    if(options.includes(cur)) sel.value = cur; else sel.value = '';
+  }
+
+  function renderAll(){
+    renderFilters();
+    document.querySelectorAll('.view').forEach(v=> v.style.display='none');
+    if(state.view==='table'){ el.viewTable.style.display='block'; renderTable(); }
+    else if(state.view==='kanban'){ el.viewKanban.style.display='block'; renderKanban(); }
+    else { el.viewTimeline.style.display='block'; renderTimeline(); }
+  }
+
+  // ------------------ 安全字串 ------------------
+  function escapeHTML(str){
+    return String(str ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[s]));
+  }
+  function escapeAttr(str){ return escapeHTML(str).replace(/"/g,'&quot;'); }
+
+  // ------------------ 初始化 ------------------
+  loadLocal();
+  // 與舊版相容：若尚未有 sprints，從 tasks 建立一次
+  if(state.sprints.length===0) bootstrapSprintsFromTasks();
+  renderAll();
+  </script>
+</body>
+</html>
